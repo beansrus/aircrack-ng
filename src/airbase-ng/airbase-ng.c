@@ -335,6 +335,11 @@ static void beacon_thread(void * arg);
 static void caffelatte_thread(void);
 static void cfrag_thread(void);
 
+#define MAC_LEN 6
+static inline int mac_cmp(uint8_t * mac1, uint8_t* mac2)
+{
+	return memcmp(mac1, mac2, MAC_LEN);
+}
 // generates a random locally administered mac address
 static inline void get_random_mac(uint8_t* mac)
 {
@@ -350,23 +355,22 @@ static inline void get_random_mac(uint8_t* mac)
 
 static int addESSID(char * essid, int len, int expiration)
 {
-	pESSID_t tmp;
 	pESSID_t cur;
+	pESSID_t last;
+	pESSID_t* head;
 	time_t now;
 	if (essid == NULL) return -1;
 
 	if (len <= 0 || len > 255) return -1;
 
+	if (!mac_cmp((uint8_t*)essid, (uint8_t*)NULL_MAC)) return -1;
+
 	ALLEGE(pthread_mutex_lock(&rESSIDmutex) == 0);
 	cur = rESSID;
+	last = rESSID;
+	head = &rESSID;
 
-	if (rESSID == NULL)
-	{
-		ALLEGE(pthread_mutex_unlock(&rESSIDmutex) == 0);
-		return -1;
-	}
-
-	while (cur->next != NULL)
+	while (cur)
 	{
 		// if it already exists, just update the expiration time
 		if (cur->len == len && !memcmp(cur->essid, essid, len))
@@ -379,33 +383,37 @@ static int addESSID(char * essid, int len, int expiration)
 			ALLEGE(pthread_mutex_unlock(&rESSIDmutex) == 0);
 			return 0;
 		}
+		last = cur;
 		cur = cur->next;
 	}
 
 	// alloc mem
-	tmp = (pESSID_t) malloc(sizeof(struct ESSID_list));
-	ALLEGE(tmp != NULL);
+	cur = (pESSID_t) malloc(sizeof(struct ESSID_list));
+	ALLEGE(cur != NULL);
 
 	// set essid
-	tmp->essid = (char *) malloc(len + 1);
-	ALLEGE(tmp->essid != NULL);
-	memcpy(tmp->essid, essid, len);
-	tmp->essid[len] = 0x00;
-	tmp->len = len;
+	cur->essid = (char *) malloc(len + 1);
+	ALLEGE(cur->essid != NULL);
+	memcpy(cur->essid, essid, len);
+	cur->essid[len] = 0x00;
+	cur->len = len;
 
 	// set expiration date
 	if (expiration)
 	{
 		time(&now);
-		tmp->expire = now + expiration;
+		cur->expire = now + expiration;
 	}
 	else
 	{
-		tmp->expire = 0;
+		cur->expire = 0;
 	}
 
-	tmp->next = NULL;
-	cur->next = tmp;
+	cur->next = NULL;
+	if (*head == NULL)
+		*head = cur;
+	else
+		last->next = cur;
 
 	ALLEGE(pthread_mutex_unlock(&rESSIDmutex) == 0);
 	return 0;
@@ -509,47 +517,52 @@ static int addMAC(pMAC_t pMAC, unsigned char * mac)
 
 static void flushESSID(void)
 {
-	pESSID_t old;
 	pESSID_t cur;
+	pESSID_t next;
+	pESSID_t prev;
+	pESSID_t* head=&rESSID;
 	time_t now;
 
 	ALLEGE(pthread_mutex_lock(&rESSIDmutex) == 0);
-	cur = rESSID;
-
 	if (rESSID == NULL)
 	{
 		ALLEGE(pthread_mutex_unlock(&rESSIDmutex) == 0);
 		return;
 	}
+	cur = *head;
+	prev = *head;
 
-	while (cur->next != NULL)
-	{
-		old = cur->next;
-		if (old->expire)
-		{
 			time(&now);
-			if (now > old->expire)
+	while (cur)
 			{
-				// got it
-				cur->next = old->next;
+		next = cur->next;
+		if ((cur->expire) && (now > cur->expire))
+		{
+			// delete node
+			free(cur->essid);
+			cur->essid = NULL;
+			cur->len = 0;
+			cur->next = NULL;
+			free(cur);
 
-				free(old->essid);
-				old->essid = NULL;
-				old->next = NULL;
-				old->len = 0;
-				free(old);
-				ALLEGE(pthread_mutex_unlock(&rESSIDmutex) == 0);
-				return;
-			}
+			// update previous nodes pointer
+			if (*head == cur)
+				*head = next;
+			else
+				prev->next = next;
 		}
-		cur = cur->next;
+		else
+			prev = cur;
+
+		cur = next;
 	}
 	ALLEGE(pthread_mutex_unlock(&rESSIDmutex) == 0);
 }
 
 static int gotESSID(char * essid, int len)
 {
-	pESSID_t old, cur;
+	pESSID_t cur;
+	int found=0;
 
 	if (essid == NULL) return (-1);
 
@@ -558,28 +571,18 @@ static int gotESSID(char * essid, int len)
 	ALLEGE(pthread_mutex_lock(&rESSIDmutex) == 0);
 	cur = rESSID;
 
-	if (rESSID == NULL)
+	while (cur)
 	{
-		ALLEGE(pthread_mutex_unlock(&rESSIDmutex) == 0);
-		return (-1);
-	}
-
-	while (cur->next != NULL)
+		if ( (cur->len == len) && memcmp(cur->essid, essid, len) == 0)
 	{
-		old = cur->next;
-		if (old->len == len)
-		{
-			if (memcmp(old->essid, essid, len) == 0)
-			{
-				ALLEGE(pthread_mutex_unlock(&rESSIDmutex) == 0);
-				return (1);
-			}
+			found = 1;
+			break;
 		}
 		cur = cur->next;
 	}
 
 	ALLEGE(pthread_mutex_unlock(&rESSIDmutex) == 0);
-	return (0);
+	return (found);
 }
 
 static int gotMAC(pMAC_t pMAC, unsigned char * mac)
@@ -609,16 +612,15 @@ static int getESSID(char * essid)
 
 	ALLEGE(pthread_mutex_lock(&rESSIDmutex) == 0);
 
-	if (rESSID == NULL || rESSID->next == NULL)
+	if (rESSID)
 	{
-		ALLEGE(pthread_mutex_unlock(&rESSIDmutex) == 0);
-		return (0);
+        memcpy(essid, rESSID->essid, rESSID->len + 1);
+        len = rESSID->len;
 	}
+	else
+		len=0;
 
-	memcpy(essid, rESSID->next->essid, rESSID->next->len + 1);
-	len = rESSID->next->len;
 	ALLEGE(pthread_mutex_unlock(&rESSIDmutex) == 0);
-
 	return (len);
 }
 
@@ -629,14 +631,8 @@ static int getNextESSID(char * essid)
 
 	ALLEGE(pthread_mutex_lock(&rESSIDmutex) == 0);
 
-	if (rESSID == NULL || rESSID->next == NULL)
-	{
-		ALLEGE(pthread_mutex_unlock(&rESSIDmutex) == 0);
-		return (0);
-	}
-
 	len = strlen(essid);
-	for (cur = rESSID->next; cur != NULL; cur = cur->next)
+	for (cur = rESSID; cur != NULL; cur = cur->next)
 	{
 		if (*essid == 0)
 		{
@@ -647,11 +643,8 @@ static int getNextESSID(char * essid)
 			&& strcmp(essid, cur->essid) == 0)
 		{
 			// SSID found, get next one
-			cur = cur->next;
-			if (cur == NULL)
-			{
-				cur = rESSID->next;
-			}
+			if ( ( cur = cur->next ) == NULL )
+				cur = rESSID;
 			break;
 		}
 	}
@@ -667,7 +660,7 @@ static int getNextESSID(char * essid)
 	return (len);
 }
 
-static int getESSIDcount(void)
+static unsigned getESSIDcount(void)
 {
 	pESSID_t cur;
 	int count = 0;
@@ -675,16 +668,10 @@ static int getESSIDcount(void)
 	ALLEGE(pthread_mutex_lock(&rESSIDmutex) == 0);
 	cur = rESSID;
 
-	if (rESSID == NULL)
+	while (cur)
 	{
-		ALLEGE(pthread_mutex_unlock(&rESSIDmutex) == 0);
-		return (-1);
-	}
-
-	while (cur->next != NULL)
-	{
-		cur = cur->next;
 		count++;
+		cur = cur->next;
 	}
 
 	ALLEGE(pthread_mutex_unlock(&rESSIDmutex) == 0);
@@ -3170,10 +3157,6 @@ int main(int argc, char * argv[])
 	memset(&apc, 0, sizeof(struct AP_conf));
 
 	ALLEGE(pthread_mutex_init(&rESSIDmutex, NULL) == 0);
-	rESSID = (pESSID_t) malloc(sizeof(struct ESSID_list));
-	ALLEGE(rESSID != NULL);
-	memset(rESSID, 0, sizeof(struct ESSID_list));
-
 	rFragment = (pFrag_t) malloc(sizeof(struct Fragment_list));
 	ALLEGE(rFragment != NULL);
 	memset(rFragment, 0, sizeof(struct Fragment_list));
