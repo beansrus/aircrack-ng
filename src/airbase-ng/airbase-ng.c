@@ -2735,8 +2735,9 @@ static void beacon_thread(void * arg)
 		essid_len = (size_t) getNextESSID((char *) essid);
 		if (!essid_len)
 		{
-			strncpy((char *) essid, "default", sizeof(essid) - 1);
-			essid_len = strlen("default");
+            continue;
+//			strncpy((char *) essid, "default", sizeof(essid) - 1);
+//			essid_len = strlen("default");
 		}
 
 		beacon_len = 0;
