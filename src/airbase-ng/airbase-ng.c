@@ -2324,8 +2324,6 @@ packet_recv(uint8_t * packet, size_t length, struct AP_conf * apc, int external)
 					}
 
 					my_send_packet(packet, length);
-					my_send_packet(packet, length);
-					my_send_packet(packet, length);
 
 					return (0);
 				}
