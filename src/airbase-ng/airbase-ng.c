@@ -2729,7 +2729,7 @@ static void beacon_thread(void * arg)
 		if ((wait_time = delay - jitter) < 0) wait_time = 0;
 
 #ifdef DEBUG
-		printf("ref=%ld, act=%ld, jitter=%04ld, wait_time=%04ld, ssids=%d\n",
+		printf("ref=%lu, act=%lu, jitter=%04ld, wait_time=%04ld, ssids=%d\n",
 			   ref_timer,
 			   SEC_TO_MSEC(ts.tv_sec) + NSEC_TO_MSEC(ts.tv_nsec),
 			   jitter,
