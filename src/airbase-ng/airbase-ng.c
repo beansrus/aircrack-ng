@@ -340,6 +340,18 @@ static inline int mac_cmp(uint8_t * mac1, uint8_t* mac2)
 {
 	return memcmp(mac1, mac2, MAC_LEN);
 }
+
+int rand_u8_(void)
+{
+    unsigned char buf;
+    FILE* fp;
+    fp = fopen("/dev/urandom", "r");
+    if (fread(&buf, 1, 1, fp) != 1)
+        printf("error reading urandom\n");
+    fclose(fp);
+    return buf;
+}
+
 // generates a random locally administered mac address
 static inline void get_random_mac(uint8_t* mac)
 {
@@ -348,9 +360,9 @@ static inline void get_random_mac(uint8_t* mac)
 	ALLEGE(mac != NULL);
 
 	// force OUI to be locally administered and unicast
-	mac[0] = (rand_u8() & 0xfe) | 0x02;
+	mac[0] = (rand_u8_() & 0xfe) | 0x02;
 	for (i = 1; i < 6; i++)
-		mac[i] = rand_u8();
+		mac[i] = rand_u8_();
 }
 
 static int addESSID(char * essid, int len, int expiration)
